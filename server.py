@@ -1,46 +1,62 @@
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-# CORS is crucial: It allows your "Game" (which will be on a different URL) 
-# to talk to this "Server".
 CORS(app)
 
-# This list will hold the scores temporarily
-game_data = []
+# --- DATABASE SETUP ---
+# This connects to the Render Database using the URL we saved earlier
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# --- DATA MODEL (The Table) ---
+class Player(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    score = db.Column(db.Integer, nullable=False)
+
+# Create the table if it doesn't exist
+with app.app_context():
+    db.create_all()
 
 @app.route('/')
 def home():
-    return "Game Server is Running!"
+    return "Game Server with Database is Running!"
 
 @app.route('/submit_score', methods=['POST'])
 def submit_score():
     data = request.json
     
-    # We expect data to look like: {"name": "Alex", "email": "a@b.com", "score": 10}
-    if not data or 'score' not in data:
-        return jsonify({"error": "Invalid data"}), 400
-        
-    # Add to our list
-    game_data.append(data)
-    print(f"New Score: {data}") # Prints to server logs
+    # Create a new player record
+    new_player = Player(
+        name=data['name'],
+        email=data['email'],
+        score=int(data['score'])
+    )
     
-    return jsonify({"message": "Score saved successfully!"}), 200
+    # Save to Database
+    db.session.add(new_player)
+    db.session.commit()
+    
+    return jsonify({"message": "Score saved to Database!"}), 200
 
 @app.route('/get_leaderboard', methods=['GET'])
 def get_leaderboard():
-    # Sort the data by score (Descending: Highest first)
-    # We use int() to make sure we compare numbers, not strings
-    sorted_data = sorted(game_data, key=lambda x: int(x['score']), reverse=True)
+    # Fetch from Database and Sort by Score (Descending)
+    players = Player.query.order_by(Player.score.desc()).all()
     
-    return jsonify(sorted_data), 200
+    # Convert to JSON list
+    output = []
+    for p in players:
+        output.append({"name": p.name, "score": p.score})
+    
+    return jsonify(output), 200
 
 if __name__ == '__main__':
-    # CLOUD REQUIREMENT:
-    # Cloud servers (like Render) tell us which Port to use via 'os.environ'.
-    # If we are on our own computer, we default to 5000.
     port = int(os.environ.get('PORT', 5000))
-    
-    # host='0.0.0.0' makes the server accessible externally
     app.run(host='0.0.0.0', port=port)
